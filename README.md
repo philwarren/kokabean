@@ -3,6 +3,41 @@
 [![build](https://github.com/jart/cosmopolitan/actions/workflows/build.yml/badge.svg)](https://github.com/jart/cosmopolitan/actions/workflows/build.yml)
 # Cosmopolitan
 
+## seawitch-cosmo Changes
+
+- **PASETO v2.local support**: Added PASETO v2.local token implementation with Lua bindings for Redbean.
+  ```lua
+  -- example paseto v2.local encrypt/decrypt:
+  -- generate random key
+  local fresh = paseto.v2_local_keygen()
+  -- or use a pre-generated key
+  local key = "k2.local.c0ysKyer-y1x6AqDENQ54ocJAOmQ5-aBN9QKCoKFBi4"
+
+  -- create an encrypted token with a random nonce
+  print(paseto.v2_local_encrypt("foo", key))
+  -- v2.local.TOZItpcX0SW54BQ7Z9H8WJ_jxDZAZbaFOlRk6KPfLkL127SjaAuzFXwO5g
+
+  -- decrypt a token
+  print(paseto.v2_local_decrypt("v2.local.TOZItpcX0SW54BQ7Z9H8WJ_jxDZAZbaFOlRk6KPfLkL127SjaAuzFXwO5g", key))
+  -- "foo"
+
+  -- create an encrypted token with a clear text footer:
+  token = paseto.v2_local_encrypt("foo", key, "clear-text-footer")
+  print(token)
+  -- v2.local.6drTQX5WW8UEQtRb8bWy6TrVa3ll0FfG6_W7QAOy4Nefa75xAZciagEKQg.Y2xlYXItdGV4dC1mb290ZXI
+
+  -- read a clear text footer before validating the token
+  print(paseto.v2_unauthenticated_footer(token))
+  -- "clear-text-footer"
+
+  -- optionally check the footer is as expected when decrypting the payload:
+  print(paseto.v2_local_decrypt(token, key)) -- "foo"
+  print(paseto.v2_local_decrypt(token, key, "invalid")) -- nil
+  print(paseto.v2_local_decrypt(token, key, "clear-text-footer")) -- foo
+
+  ```
+- **XChaCha20-Poly1305 support**: Added XChaCha20-Poly1305 AEAD implementation to mbedtls
+
 [Cosmopolitan Libc](https://justine.lol/cosmopolitan/index.html) makes C/C++
 a build-once run-anywhere language, like Java, except it doesn't need an
 interpreter or virtual machine. Instead, it reconfigures stock GCC and

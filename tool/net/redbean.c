@@ -135,6 +135,7 @@
 #include "tool/net/lfinger.h"
 #include "tool/net/lfuncs.h"
 #include "tool/net/ljson.h"
+#include "tool/net/lpaseto.h"
 #include "tool/net/lpath.h"
 #include "tool/net/luacheck.h"
 #include "tool/net/sandbox.h"
@@ -5424,6 +5425,7 @@ static const luaL_Reg kLuaLibs[] = {
     {"maxmind", LuaMaxmind},         //
     {"finger", LuaFinger},           //
     {"path", LuaPath},               //
+    {"paseto", LuaPaseto},           //
     {"re", LuaRe},                   //
     {"unix", LuaUnix},               //
 };
