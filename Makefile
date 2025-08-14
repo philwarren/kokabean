@@ -330,6 +330,7 @@ include third_party/lz4cli/BUILD.mk
 include third_party/zip/BUILD.mk
 include third_party/xxhash/BUILD.mk
 include third_party/unzip/BUILD.mk
+include third_party/paseto/BUILD.mk
 include tool/build/lib/BUILD.mk
 include third_party/chibicc/BUILD.mk
 include third_party/chibicc/test/BUILD.mk
