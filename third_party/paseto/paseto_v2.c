@@ -31,50 +31,6 @@
 #define NONCE_LEN 24
 #define HEADER_V2_LOCAL_LEN  (sizeof HEADER_V2_LOCAL - 1)
 
-static char *encode_base64url(const unsigned char *data, size_t len) {
-    char *b64 = EncodeBase64((const char *)data, len, NULL);
-    if (!b64) return NULL;
-
-    for (char *p = b64; *p; p++) {
-        if (*p == '+') *p = '-';
-        else if (*p == '/') *p = '_';
-    }
-
-    char *end = b64 + strlen(b64);
-    while (end > b64 && end[-1] == '=') {
-        end--;
-    }
-    *end = '\0';
-
-    return b64;
-}
-
-static unsigned char *decode_base64url(const char *input, size_t *output_len) {
-    if (!input || !output_len) return NULL;
-
-    size_t input_len = strlen(input);
-    char *b64 = malloc(input_len + 4);
-    if (!b64) return NULL;
-
-    strcpy(b64, input);
-
-    for (char *p = b64; *p; p++) {
-        if (*p == '-') *p = '+';
-        else if (*p == '_') *p = '/';
-    }
-
-    size_t pad_len = (4 - (input_len % 4)) % 4;
-    for (size_t i = 0; i < pad_len; i++) {
-        b64[input_len + i] = '=';
-    }
-    b64[input_len + pad_len] = '\0';
-
-    unsigned char *result = (unsigned char *)DecodeBase64(b64, input_len + pad_len, output_len);
-    free(b64);
-
-    return result;
-}
-
 const char *paseto_v2_error_message(paseto_v2_error_t error_code) {
     switch (error_code) {
         case PASETO_V2_ERROR_SUCCESS:
@@ -95,14 +51,60 @@ const char *paseto_v2_error_message(paseto_v2_error_t error_code) {
             return "Base64url encoding failed";
         case PASETO_V2_ERROR_INVALID_KEY_FORMAT:
             return "Invalid key format - expected k2.local.<base64url-data>";
+        case PASETO_V2_ERROR_BUFFER_TOO_SMALL:
+            return "Buffer too small";
         default:
             return "Unknown error code";
     }
 }
 
-paseto_v2_error_t parse_v2_local_key(const char *key_str, uint8_t **key_out, size_t *key_len_out) {
-    if (!key_str || !key_out || !key_len_out) {
+/**
+ * Encodes data as base64url (URL-safe base64 without padding)
+ * @param data input data
+ * @param len input length
+ * @return allocated base64url string or NULL on failure
+ */
+static char *encode_base64url(const uint8_t *data, size_t len) {
+    char *encoded = EncodeBase64((const char *)data, len, NULL);
+    if (!encoded) return NULL;
+
+    // Convert to URL-safe alphabet and remove padding
+    for (char *p = encoded; *p; p++) {
+        if (*p == '+') *p = '-';
+        else if (*p == '/') *p = '_';
+    }
+
+    // Remove padding
+    char *end = encoded + strlen(encoded);
+    while (end > encoded && end[-1] == '=') {
+        end--;
+    }
+    *end = '\0';
+
+    return encoded;
+}
+
+/**
+ * Decodes base64url data
+ * @param input base64url string
+ * @param output_len receives decoded length
+ * @return allocated decoded data or NULL on failure
+ */
+static uint8_t *decode_base64url(const char *input, size_t *output_len) {
+    if (!input || !output_len) return NULL;
+    
+    // DecodeBase64 handles base64url alphabet natively
+    char *decoded = DecodeBase64(input, -1, output_len);
+    return (uint8_t *)decoded;
+}
+
+paseto_v2_error_t paseto_v2_local_key_to_buffer(const char *key_str, uint8_t *key_buf, size_t buf_size) {
+    if (!key_str || !key_buf) {
         return PASETO_V2_ERROR_INVALID_KEY_FORMAT;
+    }
+    
+    if (buf_size < 32) {
+        return PASETO_V2_ERROR_BUFFER_TOO_SMALL;
     }
     
     const char *prefix = "k2.local.";
@@ -114,7 +116,7 @@ paseto_v2_error_t parse_v2_local_key(const char *key_str, uint8_t **key_out, siz
     
     const char *encoded_data = key_str + prefix_len;
     size_t decoded_len;
-    unsigned char *decoded_key = decode_base64url(encoded_data, &decoded_len);
+    uint8_t *decoded_key = decode_base64url(encoded_data, &decoded_len);
     
     if (!decoded_key) {
         return PASETO_V2_ERROR_INVALID_KEY_FORMAT;
@@ -125,8 +127,10 @@ paseto_v2_error_t parse_v2_local_key(const char *key_str, uint8_t **key_out, siz
         return PASETO_V2_ERROR_INVALID_KEY_SIZE;
     }
     
-    *key_out = decoded_key;
-    *key_len_out = decoded_len;
+    // Copy to caller's buffer and clean up temporary allocation
+    memcpy(key_buf, decoded_key, decoded_len);
+    free(decoded_key);
+    
     return PASETO_V2_ERROR_SUCCESS;
 }
 
@@ -313,7 +317,7 @@ paseto_v2_error_t paseto_v2_local_decrypt(
     const char *footer_sep = strrchr(payload_start, '.');
     const char *payload_end = footer_sep ? footer_sep : payload_start + strlen(payload_start);
 
-    unsigned char *actual_footer = NULL;
+    uint8_t *actual_footer = NULL;
     size_t actual_footer_len = 0;
     
     if (footer_sep) {
@@ -341,21 +345,24 @@ paseto_v2_error_t paseto_v2_local_decrypt(
     size_t payload_str_len = payload_end - payload_start;
     char *payload_str = malloc(payload_str_len + 1);
     if (!payload_str) {
+        free(actual_footer);
         return PASETO_V2_ERROR_OUT_OF_MEMORY;
     }
     memcpy(payload_str, payload_start, payload_str_len);
     payload_str[payload_str_len] = '\0';
 
     size_t payload_len;
-    unsigned char *payload = decode_base64url(payload_str, &payload_len);
+    uint8_t *payload = decode_base64url(payload_str, &payload_len);
     free(payload_str);
 
     if (!payload) {
+        free(actual_footer);
         return PASETO_V2_ERROR_ENCODING_FAILED;
     }
 
     if (payload_len < NONCE_LEN + 16) {
         free(payload);
+        free(actual_footer);
         return PASETO_V2_ERROR_CRYPTO_FAILED;
     }
 
@@ -400,6 +407,7 @@ paseto_v2_error_t paseto_v2_local_decrypt(
     if (!plaintext) {
         free(payload);
         free(pae);
+        free(actual_footer);
         return PASETO_V2_ERROR_OUT_OF_MEMORY;
     }
 
@@ -441,7 +449,7 @@ paseto_v2_error_t paseto_extract_footer(const char *token, uint8_t **footer_out,
         return PASETO_V2_ERROR_SUCCESS;
     }
     
-    unsigned char *footer_decoded = decode_base64url(footer_sep + 1, footer_len_out);
+    uint8_t *footer_decoded = decode_base64url(footer_sep + 1, footer_len_out);
     if (!footer_decoded) {
         return PASETO_V2_ERROR_ENCODING_FAILED;
     }

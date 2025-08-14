@@ -6,7 +6,6 @@ COSMOPOLITAN_C_START_
  * @fileoverview PASETO v2.local implementation
  */
 
-// Error codes
 typedef enum {
     PASETO_V2_ERROR_SUCCESS = 0,
     PASETO_V2_ERROR_INVALID_KEY_SIZE = 1,
@@ -16,20 +15,21 @@ typedef enum {
     PASETO_V2_ERROR_BLAKE2B_FAILED = 5,
     PASETO_V2_ERROR_CRYPTO_FAILED = 6,
     PASETO_V2_ERROR_ENCODING_FAILED = 7,
-    PASETO_V2_ERROR_INVALID_KEY_FORMAT = 8
+    PASETO_V2_ERROR_INVALID_KEY_FORMAT = 8,
+    PASETO_V2_ERROR_BUFFER_TOO_SMALL = 9
 } paseto_v2_error_t;
 
 const char *paseto_v2_error_message(paseto_v2_error_t error_code);
 
 /**
- * Parse a k2.local.* key and extract the raw key bytes
+ * Parse a k2.local.* key into a provided buffer
  * 
  * @param key_str Key string in k2.local.<base64url> format
- * @param key_out Pointer to store allocated key bytes (must be freed)
- * @param key_len_out Pointer to store key length
+ * @param key_buf Buffer to store key bytes (must be at least 32 bytes)
+ * @param buf_size Size of the provided buffer
  * @return Error code
  */
-paseto_v2_error_t parse_v2_local_key(const char *key_str, uint8_t **key_out, size_t *key_len_out);
+paseto_v2_error_t paseto_v2_local_key_to_buffer(const char *key_str, uint8_t *key_buf, size_t buf_size);
 
 /**
  * Generate a new random key for v2.local

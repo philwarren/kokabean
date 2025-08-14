@@ -18,6 +18,10 @@
 
 #include "third_party/paseto/paseto_v3.h"
 #include "libc/mem/mem.h"
+#include "libc/str/str.h"
+#include "net/http/escape.h"
+
+#define PASETO_V3_KEY_SIZE 32
 
 const char *paseto_v3_error_message(paseto_v3_error_t error_code) {
     switch (error_code) {
@@ -79,4 +83,40 @@ paseto_v3_error_t paseto_v3_local_decrypt(
     *message_out = NULL;
     *message_len_out = 0;
     return PASETO_V3_ERROR_NOT_IMPLEMENTED;
+}
+
+paseto_v3_error_t paseto_v3_local_key_to_buffer(const char *key_str, uint8_t *key_buf, size_t buf_size) {
+    if (!key_str || !key_buf) {
+        return PASETO_V3_ERROR_INVALID_KEY_FORMAT;
+    }
+    
+    if (buf_size < PASETO_V3_KEY_SIZE) {
+        return PASETO_V3_ERROR_BUFFER_TOO_SMALL;
+    }
+    
+    const char *prefix = "k3.local.";
+    size_t prefix_len = strlen(prefix);
+    
+    if (strncmp(key_str, prefix, prefix_len) != 0) {
+        return PASETO_V3_ERROR_INVALID_KEY_FORMAT;
+    }
+    
+    const char *encoded_data = key_str + prefix_len;
+    size_t decoded_len;
+    char *decoded_key = DecodeBase64(encoded_data, -1, &decoded_len);
+    
+    if (!decoded_key) {
+        return PASETO_V3_ERROR_INVALID_KEY_FORMAT;
+    }
+    
+    if (decoded_len != PASETO_V3_KEY_SIZE) {
+        free(decoded_key);
+        return PASETO_V3_ERROR_INVALID_KEY_SIZE;
+    }
+    
+    // Copy to caller's buffer and clean up temporary allocation
+    memcpy(key_buf, decoded_key, decoded_len);
+    free(decoded_key);
+    
+    return PASETO_V3_ERROR_SUCCESS;
 }

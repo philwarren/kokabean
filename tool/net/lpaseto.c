@@ -27,6 +27,10 @@
  * RFC https://paseto.io/rfc/
  */
 
+#define PASETO_V2_KEY_SIZE 32
+#define PASETO_V3_KEY_SIZE 32
+#define PASETO_V2_ENTROPY_SIZE 24
+
 // paseto.v2_local_encrypt(message, key, [footer], [entropy])
 //     └─→ token
 //     └─→ nil, error
@@ -36,6 +40,9 @@ static int LuaV2LocalEncrypt(lua_State *L) {
     const char *key_str = luaL_checkstring(L, 2);
     const char *footer = NULL;
     const char *entropy_raw = NULL;
+    char *token = NULL;
+    uint8_t key_buf[PASETO_V2_KEY_SIZE];
+    int result;
 
     if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
         footer = luaL_checklstring(L, 3, &footer_len);
@@ -44,45 +51,41 @@ static int LuaV2LocalEncrypt(lua_State *L) {
         entropy_raw = luaL_checklstring(L, 4, &entropy_len);
     }
 
-    // Parse key
-    uint8_t *key_bin = NULL;
-    size_t key_len = 0;
-    int parse_result = parse_v2_local_key(key_str, &key_bin, &key_len);
-    if (parse_result != PASETO_V2_ERROR_SUCCESS) {
-        lua_pushnil(L);
-        lua_pushstring(L, paseto_v2_error_message(parse_result));
-        return 2;
+    // Parse key to stack buffer
+    result = paseto_v2_local_key_to_buffer(key_str, key_buf, sizeof(key_buf));
+    if (result != PASETO_V2_ERROR_SUCCESS) {
+        goto error;
     }
 
     // Validate entropy length if provided
-    if (entropy_raw && entropy_len != 24) {
-        free(key_bin);
-        lua_pushnil(L);
-        lua_pushstring(L, "Make sure that you provide 24 bytes of entropy");
-        return 2;
+    if (entropy_raw && entropy_len != PASETO_V2_ENTROPY_SIZE) {
+        result = PASETO_V2_ERROR_INVALID_ENTROPY;
+        goto error;
     }
 
-    char *token = NULL;
-    int result = paseto_v2_local_encrypt(
+    // Main operation
+    result = paseto_v2_local_encrypt(
         (const uint8_t *)message, message_len,
-        key_bin,
+        key_buf,
         (const uint8_t *)footer, footer_len,
         (const uint8_t *)entropy_raw,
         &token
     );
 
-    // Clean up
-    free(key_bin);
-
-    if (result != 0) {
-        lua_pushnil(L);
-        lua_pushstring(L, paseto_v2_error_message(result));
-        return 2;
+    if (result != PASETO_V2_ERROR_SUCCESS) {
+        goto error;
     }
 
+    // Success path
     lua_pushstring(L, token);
     free(token);
     return 1;
+
+error:
+    free(token);
+    lua_pushnil(L);
+    lua_pushstring(L, paseto_v2_error_message(result));
+    return 2;
 }
 
 // paseto.v2_local_decrypt(token, key, [expected_footer])
@@ -93,43 +96,43 @@ static int LuaV2LocalDecrypt(lua_State *L) {
     const char *token = luaL_checkstring(L, 1);
     const char *key_str = luaL_checkstring(L, 2);
     const char *expected_footer = NULL;
+    uint8_t *message = NULL;
+    size_t message_len = 0;
+    uint8_t key_buf[PASETO_V2_KEY_SIZE];
+    int result;
 
     if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
         expected_footer = luaL_checklstring(L, 3, &expected_footer_len);
     }
 
-    // Parse key
-    uint8_t *key_bin = NULL;
-    size_t key_len = 0;
-    int parse_result = parse_v2_local_key(key_str, &key_bin, &key_len);
-    if (parse_result != PASETO_V2_ERROR_SUCCESS) {
-        lua_pushnil(L);
-        lua_pushstring(L, paseto_v2_error_message(parse_result));
-        return 2;
+    // Parse key to stack buffer
+    result = paseto_v2_local_key_to_buffer(key_str, key_buf, sizeof(key_buf));
+    if (result != PASETO_V2_ERROR_SUCCESS) {
+        goto error;
     }
 
-    uint8_t *message = NULL;
-    size_t message_len = 0;
-
-    int result = paseto_v2_local_decrypt(
+    // Main operation
+    result = paseto_v2_local_decrypt(
         token,
-        key_bin,
+        key_buf,
         (const uint8_t *)expected_footer, expected_footer_len,
         &message, &message_len
     );
 
-    // Clean up
-    free(key_bin);
-
-    if (result != 0) {
-        lua_pushnil(L);
-        lua_pushstring(L, paseto_v2_error_message(result));
-        return 2;
+    if (result != PASETO_V2_ERROR_SUCCESS) {
+        goto error;
     }
 
+    // Success path
     lua_pushlstring(L, (const char *)message, message_len);
     free(message);
     return 1;
+
+error:
+    free(message);
+    lua_pushnil(L);
+    lua_pushstring(L, paseto_v2_error_message(result));
+    return 2;
 }
 
 // paseto.v2_local_keygen()
@@ -140,14 +143,19 @@ static int LuaV2LocalKeygen(lua_State *L) {
     int result = paseto_v2_local_keygen(&key);
     
     if (result != PASETO_V2_ERROR_SUCCESS) {
-        lua_pushnil(L);
-        lua_pushstring(L, paseto_v2_error_message(result));
-        return 2;
+        goto error;
     }
     
+    // Success path
     lua_pushstring(L, key);
     free(key);
     return 1;
+
+error:
+    free(key);
+    lua_pushnil(L);
+    lua_pushstring(L, paseto_v2_error_message(result));
+    return 2;
 }
 
 // paseto.v3_local_encrypt(message, key, [footer], [entropy])
@@ -159,6 +167,9 @@ static int LuaV3LocalEncrypt(lua_State *L) {
     const char *key_str = luaL_checkstring(L, 2);
     const char *footer = NULL;
     const char *entropy_raw = NULL;
+    char *token = NULL;
+    uint8_t key_buf[PASETO_V3_KEY_SIZE];
+    int result;
 
     if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
         footer = luaL_checklstring(L, 3, &footer_len);
@@ -167,24 +178,35 @@ static int LuaV3LocalEncrypt(lua_State *L) {
         entropy_raw = luaL_checklstring(L, 4, &entropy_len);
     }
 
-    char *token = NULL;
-    int result = paseto_v3_local_encrypt(
+    // Parse key to stack buffer
+    result = paseto_v3_local_key_to_buffer(key_str, key_buf, sizeof(key_buf));
+    if (result != PASETO_V3_ERROR_SUCCESS) {
+        goto error;
+    }
+
+    // Main operation
+    result = paseto_v3_local_encrypt(
         (const uint8_t *)message, message_len,
-        (const uint8_t *)key_str, // placeholder - v3 key parsing not implemented
+        key_buf,
         (const uint8_t *)footer, footer_len,
         (const uint8_t *)entropy_raw,
         &token
     );
 
-    if (result != 0) {
-        lua_pushnil(L);
-        lua_pushstring(L, paseto_v3_error_message(result));
-        return 2;
+    if (result != PASETO_V3_ERROR_SUCCESS) {
+        goto error;
     }
 
+    // Success path
     lua_pushstring(L, token);
     free(token);
     return 1;
+
+error:
+    free(token);
+    lua_pushnil(L);
+    lua_pushstring(L, paseto_v3_error_message(result));
+    return 2;
 }
 
 // paseto.v3_local_decrypt(token, key, [expected_footer])
@@ -195,30 +217,43 @@ static int LuaV3LocalDecrypt(lua_State *L) {
     const char *token = luaL_checkstring(L, 1);
     const char *key_str = luaL_checkstring(L, 2);
     const char *expected_footer = NULL;
+    uint8_t *message = NULL;
+    size_t message_len = 0;
+    uint8_t key_buf[PASETO_V3_KEY_SIZE];
+    int result;
 
     if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
         expected_footer = luaL_checklstring(L, 3, &expected_footer_len);
     }
 
-    uint8_t *message = NULL;
-    size_t message_len = 0;
+    // Parse key to stack buffer
+    result = paseto_v3_local_key_to_buffer(key_str, key_buf, sizeof(key_buf));
+    if (result != PASETO_V3_ERROR_SUCCESS) {
+        goto error;
+    }
 
-    int result = paseto_v3_local_decrypt(
+    // Main operation
+    result = paseto_v3_local_decrypt(
         token,
-        (const uint8_t *)key_str, // placeholder - v3 key parsing not implemented
+        key_buf,
         (const uint8_t *)expected_footer, expected_footer_len,
         &message, &message_len
     );
 
-    if (result != 0) {
-        lua_pushnil(L);
-        lua_pushstring(L, paseto_v3_error_message(result));
-        return 2;
+    if (result != PASETO_V3_ERROR_SUCCESS) {
+        goto error;
     }
 
+    // Success path
     lua_pushlstring(L, (const char *)message, message_len);
     free(message);
     return 1;
+
+error:
+    free(message);
+    lua_pushnil(L);
+    lua_pushstring(L, paseto_v3_error_message(result));
+    return 2;
 }
 
 // paseto.v3_local_keygen()
@@ -229,30 +264,40 @@ static int LuaV3LocalKeygen(lua_State *L) {
     int result = paseto_v3_local_keygen(&key);
     
     if (result != PASETO_V3_ERROR_SUCCESS) {
-        lua_pushnil(L);
-        lua_pushstring(L, paseto_v3_error_message(result));
-        return 2;
+        goto error;
     }
     
+    // Success path
     lua_pushstring(L, key);
     free(key);
     return 1;
+
+error:
+    free(key);
+    lua_pushnil(L);
+    lua_pushstring(L, paseto_v3_error_message(result));
+    return 2;
 }
 
 // paseto.unauthenticated_footer(token)
 //     └─→ footer_string (or empty string if no footer)
 static int LuaV2UnauthenticatedFooter(lua_State *L) {
     const char *token = luaL_checkstring(L, 1);
-
     uint8_t *footer = NULL;
     size_t footer_len = 0;
     int result = paseto_extract_footer(token, &footer, &footer_len);
 
-    if (result != PASETO_V2_ERROR_SUCCESS || !footer) {
+    if (result != PASETO_V2_ERROR_SUCCESS) {
         lua_pushstring(L, "");
         return 1;
     }
 
+    if (!footer) {
+        lua_pushstring(L, "");
+        return 1;
+    }
+
+    // Success path
     lua_pushlstring(L, (const char *)footer, footer_len);
     free(footer);
     return 1;

@@ -13,10 +13,21 @@ typedef enum {
     PASETO_V3_ERROR_INVALID_KEY_SIZE = 2,
     PASETO_V3_ERROR_OUT_OF_MEMORY = 3,
     PASETO_V3_ERROR_ENCODING_FAILED = 4,
-    PASETO_V3_ERROR_INVALID_KEY_FORMAT = 5
+    PASETO_V3_ERROR_INVALID_KEY_FORMAT = 5,
+    PASETO_V3_ERROR_BUFFER_TOO_SMALL = 6
 } paseto_v3_error_t;
 
 const char *paseto_v3_error_message(paseto_v3_error_t error_code);
+
+/**
+ * Parse a k3.local.* key into a provided buffer
+ * 
+ * @param key_str Key string in k2.local.<base64url> format
+ * @param key_buf Buffer to store key bytes (must be at least 32 bytes)
+ * @param buf_size Size of the provided buffer
+ * @return Error code
+ */
+paseto_v3_error_t paseto_v3_local_key_to_buffer(const char *key_str, uint8_t *key_buf, size_t buf_size);
 
 /**
  * Generate a new random key for v3.local (placeholder)
