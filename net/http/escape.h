@@ -39,6 +39,7 @@ char *EncodeBase32(const char *, size_t, const char *, size_t,
 char *DecodeBase32(const char *, size_t, const char *, size_t,
                    size_t *) libcesque;
 char *EncodeBase64(const char *, size_t, size_t *) libcesque;
+char *EncodeBase64Url(const char *, size_t, size_t *) libcesque;
 char *DecodeBase64(const char *, size_t, size_t *) libcesque;
 
 COSMOPOLITAN_C_END_

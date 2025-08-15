@@ -21,6 +21,7 @@
 #include "net/http/escape.h"
 
 #define CHARS "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+#define CHURL "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
 /**
  * Encodes binary to base64 ascii representation.
@@ -58,6 +59,53 @@ char *EncodeBase64(const char *data, size_t size, size_t *out_size) {
   }
   if (out_size) {
     *out_size = n;
+  }
+  return r;
+}
+
+
+/**
+ * Encodes binary to base64url ascii representation.
+ *
+ * This is the URL-safe variant that uses - and _ instead of + and /,
+ * and omits padding characters.
+ *
+ * @param data is input value
+ * @param size if -1 implies strlen
+ * @param out_size if non-NULL receives output length
+ * @return allocated NUL-terminated buffer, or NULL w/ errno
+ */
+char *EncodeBase64Url(const char *data, size_t size, size_t *out_size) {
+  size_t n, actual_len;
+  unsigned w;
+  char *r, *q;
+  const unsigned char *p, *pe;
+  if (size == -1)
+    size = data ? strlen(data) : 0;
+  if ((n = size) % 3)
+    n += 3 - size % 3;
+  n /= 3, n *= 4;
+  if ((r = malloc(n + 1))) {
+    for (q = r, p = (void *)data, pe = p + size; p < pe; p += 3) {
+      w = p[0] << 020;
+      if (p + 1 < pe)
+        w |= p[1] << 010;
+      if (p + 2 < pe)
+        w |= p[2] << 000;
+      *q++ = CHURL[(w >> 18) & 077];
+      *q++ = CHURL[(w >> 12) & 077];
+      if (p + 1 < pe)
+        *q++ = CHURL[(w >> 6) & 077];
+      if (p + 2 < pe)
+        *q++ = CHURL[w & 077];
+    }
+    *q = '\0';
+    actual_len = q - r;
+  } else {
+    actual_len = 0;
+  }
+  if (out_size) {
+    *out_size = actual_len;
   }
   return r;
 }

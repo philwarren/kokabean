@@ -22,6 +22,16 @@
 #include "third_party/paseto/paseto_v2.h"
 #include "third_party/paseto/paseto_v3.h"
 
+#include <errno.h>
+#include "libc/stdio/rand.h"
+#include "libc/str/str.h"
+#include "net/http/escape.h"
+#include "third_party/mbedtls/ctr_drbg.h"
+#include "third_party/mbedtls/ecdsa.h"
+#include "third_party/mbedtls/entropy.h"
+#include "third_party/mbedtls/error.h"
+#include "third_party/mbedtls/platform.h"
+
 /**
  * @fileoverview Paseto (Platform-Agnostic SEcurity TOkens) Lua bindings
  * RFC https://paseto.io/rfc/
@@ -260,22 +270,104 @@ error:
 //     └─→ key
 //     └─→ nil, error
 static int LuaV3LocalKeygen(lua_State *L) {
-    char *key = NULL;
-    int result = paseto_v3_local_keygen(&key);
-    
-    if (result != PASETO_V3_ERROR_SUCCESS) {
-        goto error;
+        
+    char raw_key[32];
+    if (getentropy(raw_key, sizeof(raw_key))) {
+        lua_pushnil(L);
+        lua_pushfstring(L, "getentropy failed: %s", strerror(errno));
+        return 2;
     }
     
-    // Success path
-    lua_pushstring(L, key);
-    free(key);
-    return 1;
+    size_t encoded_key_len;
+    char *encoded_key = EncodeBase64Url(raw_key, sizeof(raw_key), &encoded_key_len);
+    mbedtls_platform_zeroize(raw_key, sizeof(raw_key));
 
-error:
-    free(key);
+    if (!encoded_key) {
+        lua_pushnil(L);
+        lua_pushfstring(L, "EncodeBase64Url failed: %s", strerror(errno));
+        return 2;
+    }
+
+    lua_pushfstring(L, "k3.local.%s", encoded_key);
+    mbedtls_platform_zeroize(encoded_key, encoded_key_len);
+    free(encoded_key);
+    return 1;
+}
+
+// paseto.v3_public_keygen()
+//     └─→ public, secret
+//     └─→ nil, error
+static int LuaV3PublicKeygen(lua_State *L) {
+   
+    int mbedtls_ret;
+    mbedtls_ecdsa_context ctx;
+    mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+    size_t priv_encoded_len = 0;
+    char *priv_encoded = NULL;
+    char *pub_encoded = NULL;
+    char pub_raw[49]; // 1 byte prefix + 48 bytes for P-384
+    char priv_raw[48]; // P-384 private key is 48 bytes
+    size_t pub_len;
+
+    // Treat ECDSA context as an ECP keypair for public member access
+    mbedtls_ecp_keypair *keypair = (mbedtls_ecp_keypair *)&ctx;
+
+    mbedtls_ecdsa_init(&ctx);
+    mbedtls_entropy_init(&entropy);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+
+    const unsigned char pers[] = "paseto-k3-keygen";
+    mbedtls_ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func,
+                                        &entropy, pers, sizeof(pers) - 1);
+    if (mbedtls_ret) goto error_mbedtls;
+
+    mbedtls_ret = mbedtls_ecdsa_genkey(&ctx, MBEDTLS_ECP_DP_SECP384R1,
+                                       mbedtls_ctr_drbg_random, &ctr_drbg);
+    if(mbedtls_ret) goto error_mbedtls;
+
+    // Export compressed public key
+    mbedtls_ret = mbedtls_ecp_point_write_binary(&keypair->grp, &keypair->Q,
+                                                 MBEDTLS_ECP_PF_COMPRESSED,
+                                                 &pub_len,
+                                                 (unsigned char *)pub_raw, sizeof(pub_raw));
+    if (mbedtls_ret) goto error_mbedtls;
+
+    // Export private scalar
+    mbedtls_ret = mbedtls_mpi_write_binary(&keypair->d,
+                                           (unsigned char *)priv_raw, sizeof(priv_raw));
+    if (mbedtls_ret) goto error_mbedtls;
+
+    // Encode to Base64URL
+    priv_encoded = EncodeBase64Url(priv_raw, sizeof(priv_raw), &priv_encoded_len);
+    pub_encoded  = EncodeBase64Url(pub_raw, pub_len, NULL);
+    mbedtls_platform_zeroize(priv_raw, sizeof(priv_raw)); // wipe raw priv
+
+    if(!priv_encoded || !pub_encoded) {
+        lua_pushnil(L);
+        lua_pushfstring(L, "EncodeBase64Url failed: %s", strerror(errno));
+        goto free_return;
+    }
+
+    lua_pushfstring(L, "k3.public.%s", pub_encoded);
+    lua_pushfstring(L, "k3.secret.%s", priv_encoded);
+    goto free_return;
+    
+error_mbedtls:
+    char errbuf[128];
+    mbedtls_strerror(mbedtls_ret, errbuf, sizeof(errbuf));
     lua_pushnil(L);
-    lua_pushstring(L, paseto_v3_error_message(result));
+    lua_pushfstring(L, "keygen failed: %s", errbuf);
+
+free_return:
+    if(priv_encoded) {
+        mbedtls_platform_zeroize(priv_encoded, priv_encoded_len);
+        free(priv_encoded);
+    }
+    free(pub_encoded);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+    mbedtls_entropy_free(&entropy);
+    mbedtls_ecdsa_free(&ctx);
     return 2;
 }
 
@@ -307,9 +399,13 @@ static const luaL_Reg kLuaPaseto[] = {
     {"v2_local_encrypt",          LuaV2LocalEncrypt},
     {"v2_local_decrypt",          LuaV2LocalDecrypt},
     {"v2_local_keygen",           LuaV2LocalKeygen},
+
     {"v3_local_encrypt",          LuaV3LocalEncrypt},
     {"v3_local_decrypt",          LuaV3LocalDecrypt},
     {"v3_local_keygen",           LuaV3LocalKeygen},
+
+    {"v3_public_keygen",          LuaV3PublicKeygen},
+
     {"v2_unauthenticated_footer", LuaV2UnauthenticatedFooter},
     {0},
 };
