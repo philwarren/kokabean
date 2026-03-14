@@ -7408,6 +7408,9 @@ void RedBean(int argc, char *argv[]) {
   }
   LuaStart();
   GetOpts(argc, argv);
+#ifdef KOKABEAN
+  KokabeanApplyConfig();
+#endif
 #ifndef STATIC
   if (selfmodifiable) {
     MakeExecutableModifiable();
