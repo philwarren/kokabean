@@ -6146,7 +6146,10 @@ static char *HandleRequest(void) {
     FreeLater(ParseParams(inbuf.p + hdrsize, payloadlength, &url.params));
   }
   FreeLater(url.params.p);
-#ifndef STATIC
+#ifdef KOKABEAN
+  if (kokabean_has_handler)
+    return KokabeanOnHttpRequest();
+#elif !defined(STATIC)
   if (hasonhttprequest)
     return LuaOnHttpRequest();
 #endif
@@ -7464,6 +7467,7 @@ void RedBean(int argc, char *argv[]) {
   }
 }
 
+#ifndef KOKABEAN
 int main(int argc, char *argv[]) {
   lua_progname = "redbean";
 
@@ -7490,3 +7494,4 @@ int main(int argc, char *argv[]) {
 
   return 0;
 }
+#endif /* !KOKABEAN */
